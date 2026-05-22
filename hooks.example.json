@@ -1,0 +1,16 @@
+{
+    "hooks": {
+        "Stop": [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "\"/Users/luis/data/workspaces/codex-notification/scripts/run-hook\"",
+                        "timeout": 30,
+                        "statusMessage": "sending completion notification"
+                    }
+                ]
+            }
+        ]
+    }
+}

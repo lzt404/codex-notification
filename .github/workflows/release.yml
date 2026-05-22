@@ -1,0 +1,108 @@
+name: Release
+
+on:
+    push:
+        tags:
+            - "*"
+
+permissions:
+    contents: write
+
+jobs:
+    build:
+        name: Build ${{ matrix.asset_os }} ${{ matrix.goarch }}
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - goos: darwin
+                      goarch: amd64
+                      asset_os: macos
+                      archive: tar.gz
+                      binary: codex-notification
+                    - goos: darwin
+                      goarch: arm64
+                      asset_os: macos
+                      archive: tar.gz
+                      binary: codex-notification
+                    - goos: windows
+                      goarch: amd64
+                      asset_os: windows
+                      archive: zip
+                      binary: codex-notification.exe
+                    - goos: windows
+                      goarch: arm64
+                      asset_os: windows
+                      archive: zip
+                      binary: codex-notification.exe
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+
+            - name: Build package
+              shell: bash
+              env:
+                  CGO_ENABLED: "0"
+                  GOOS: ${{ matrix.goos }}
+                  GOARCH: ${{ matrix.goarch }}
+              run: |
+                  set -euo pipefail
+
+                  version="${GITHUB_REF_NAME}"
+                  package_name="codex-notification_${version}_${{ matrix.asset_os }}_${{ matrix.goarch }}"
+                  package_dir="dist/${package_name}"
+
+                  mkdir -p "${package_dir}/bin"
+                  go build -trimpath -ldflags="-s -w" -o "${package_dir}/bin/${{ matrix.binary }}" ./cmd/codex-notification
+
+                  cp README.md LICENSE codex-notification.env.example hooks.example.json hooks.windows.example.json "${package_dir}/"
+                  cp -R scripts "${package_dir}/"
+                  cp -R prompts "${package_dir}/"
+                  chmod +x "${package_dir}/scripts/run-hook" || true
+
+                  if [[ "${{ matrix.archive }}" == "zip" ]]; then
+                      (cd dist && zip -r "../${package_name}.zip" "${package_name}")
+                  else
+                      tar -C dist -czf "${package_name}.tar.gz" "${package_name}"
+                  fi
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: codex-notification-${{ matrix.asset_os }}-${{ matrix.goarch }}
+                  path: |
+                      codex-notification_${{ github.ref_name }}_${{ matrix.asset_os }}_${{ matrix.goarch }}.*
+                  if-no-files-found: error
+
+    release:
+        name: Publish release
+        runs-on: ubuntu-latest
+        needs: build
+        steps:
+            - name: Download artifacts
+              uses: actions/download-artifact@v4
+              with:
+                  path: dist
+                  merge-multiple: true
+
+            - name: Generate checksums
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  (cd dist && sha256sum codex-notification_* > SHA256SUMS)
+
+            - name: Create GitHub release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: |
+                      dist/codex-notification_*
+                      dist/SHA256SUMS
+                  generate_release_notes: true
+                  fail_on_unmatched_files: true
