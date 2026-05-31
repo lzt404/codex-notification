@@ -2,8 +2,8 @@
 
 You are installing the Codex Notification Stop hook on this machine.
 
-Repository: `router-for-me/codex-notification`
-Latest release page: `https://github.com/router-for-me/codex-notification/releases/latest`
+Repository: `lzt404/codex-notification`
+Latest release page: `https://github.com/lzt404/codex-notification/releases/latest`
 Configuration file: `~/.codex/codex-notification.env`
 
 Follow these steps in order. Guide the user one step at a time. Do not ask for all credentials at once.
@@ -20,7 +20,7 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
 4. Create `~/.codex/codex-notification.env` if it does not exist. Use `codex-notification.env.example` as the template.
 5. Preserve any existing values in `codex-notification.env`.
 6. Configure notification providers interactively:
-   - First ask whether the user wants to enable QQ Bot notifications, Telegram Bot notifications, or both.
+   - First ask whether the user wants to enable QQ Bot notifications, Telegram Bot notifications, WeChat notifications, or more than one provider.
    - If a provider is already fully configured, show only that it is configured; do not print secret values.
    - Never guess credentials. Ask only for missing values.
 7. Configure QQ Bot if the user enables it:
@@ -62,19 +62,32 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
         - macOS: `curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/deleteWebhook"`
         - Windows PowerShell: `Invoke-RestMethod "https://api.telegram.org/bot$env:TELEGRAM_BOT_TOKEN/deleteWebhook"`
      3. Ask the user to send another new message and run `getUpdates` again.
-9. Configure notification filters:
+9. Configure WeChat if the user enables it:
+   - Explain that WeChat notifications use the Weixin HTTP JSON API channel and send plain text only.
+   - If `WECHAT_TOKEN`, `WECHAT_ACCOUNT_ID`, or `WECHAT_TARGET_USER_ID` is missing, run the installed wrapper with `capture-wechat`:
+     - macOS: `<install-dir>/scripts/run-hook capture-wechat`
+     - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat`
+   - Tell the user to scan the QR code printed in the terminal with WeChat, confirm login on the phone, then send any message to the WeChat bot so the helper can capture `WECHAT_CONTEXT_TOKEN`.
+   - Save the printed `WECHAT_TOKEN=...`, `WECHAT_ACCOUNT_ID=...`, `WECHAT_TARGET_USER_ID=...`, `WECHAT_CONTEXT_TOKEN=...`, and `WECHAT_API_BASE=...` lines into `codex-notification.env`. Complete WeChat credentials enable the provider automatically; `WECHAT_ENABLED` is not required.
+   - If login values already exist but `WECHAT_CONTEXT_TOKEN` is missing, run the installed wrapper with `capture-wechat-context` and ask the user to send any message to the WeChat bot:
+     - macOS: `<install-dir>/scripts/run-hook capture-wechat-context`
+     - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat-context`
+   - If WeChat capture or sending fails on Windows with `TLS handshake timeout` while `curl` or `Invoke-WebRequest` to `https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3` succeeds, set `GODEBUG=netdns=cgo` in `codex-notification.env` and retry. Do not use `netdns=cgo+1` in the saved configuration because it prints diagnostic text.
+   - Do not save a QR image file or a separate WeChat state JSON file; persist only the printed environment values in `codex-notification.env`.
+   - Do not run `capture-wechat` or `capture-wechat-context` from the normal Stop hook; they are only manual setup helpers.
+10. Configure notification filters:
    - Ask whether notifications should be limited to the current main model only.
    - If yes, set `NOTIFICATION_ALLOWED_MODELS` to the current Codex model name when it is available.
    - Keep `NOTIFICATION_BLOCKED_MODELS=mini,small,lite,flash,haiku,nano` unless the user asks for different filtering.
    - Keep `NOTIFICATION_ALLOW_SUBAGENTS=false` unless the user explicitly wants subagent notifications.
-10. Update `~/.codex/hooks.json` without removing existing hooks:
+11. Update `~/.codex/hooks.json` without removing existing hooks:
    - Add a `Stop` command hook that points to `scripts/run-hook` on macOS.
    - Add a `Stop` command hook that runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1"` on Windows.
    - Do not duplicate the hook if an equivalent Codex Notification hook already exists.
-11. On macOS, make sure `scripts/run-hook` is executable.
-12. Verify the binary exists before installing the hook. The wrapper scripts require the release binary and do not run from source:
+12. On macOS, make sure `scripts/run-hook` is executable.
+13. Verify the binary exists before installing the hook. The wrapper scripts require the release binary and do not run from source:
    - macOS: `bin/codex-notification`
    - Windows: `bin\codex-notification.exe`
-13. Do not send a real QQ or Telegram notification unless the user explicitly asks for a live test.
+14. Do not send a real QQ, Telegram, or WeChat notification unless the user explicitly asks for a live test.
 
 Keep all user-facing conversation in the user's language. Keep any Git or GitHub text in English.
