@@ -4,6 +4,15 @@ on:
     push:
         tags:
             - "*"
+    workflow_dispatch:
+        inputs:
+            tag:
+                description: Release tag to publish
+                required: true
+                type: string
+
+env:
+    RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 permissions:
     contents: write
@@ -40,6 +49,8 @@ jobs:
         steps:
             - name: Checkout
               uses: actions/checkout@v4
+              with:
+                  ref: ${{ env.RELEASE_TAG }}
 
             - name: Setup Go
               uses: actions/setup-go@v5
@@ -55,7 +66,7 @@ jobs:
               run: |
                   set -euo pipefail
 
-                  version="${GITHUB_REF_NAME}"
+                  version="${RELEASE_TAG}"
                   package_name="codex-notification_${version}_${{ matrix.asset_os }}_${{ matrix.goarch }}"
                   package_dir="dist/${package_name}"
 
@@ -78,7 +89,7 @@ jobs:
               with:
                   name: codex-notification-${{ matrix.asset_os }}-${{ matrix.goarch }}
                   path: |
-                      codex-notification_${{ github.ref_name }}_${{ matrix.asset_os }}_${{ matrix.goarch }}.*
+                      codex-notification_${{ env.RELEASE_TAG }}_${{ matrix.asset_os }}_${{ matrix.goarch }}.*
                   if-no-files-found: error
 
     release:
@@ -101,6 +112,7 @@ jobs:
             - name: Create GitHub release
               uses: softprops/action-gh-release@v2
               with:
+                  tag_name: ${{ env.RELEASE_TAG }}
                   files: |
                       dist/codex-notification_*
                       dist/SHA256SUMS
