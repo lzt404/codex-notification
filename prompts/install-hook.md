@@ -35,6 +35,7 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
         - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-openid`
      3. Tell the user to send `/openid` as a private message to the QQ Bot from the QQ account that should receive notifications.
      4. Wait for the helper to report that `TARGET_OPENID` was saved to `codex-notification.env`.
+     5. Tell the user to restart Codex after setup completes so the updated notification configuration can take effect.
    - If capture times out, ask the user to run capture again and send `/openid` again. Also ask them to confirm that the message was sent to the bot application that owns the configured `APP_ID`.
 8. Configure Telegram Bot if the user enables it:
    - Ask the user to open Telegram and start a chat with `@BotFather`.
@@ -71,10 +72,12 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
    - Do not manually construct a QR code from the raw `qrcode` login-status key. That key may scan as plain text. Use the QR code printed by the helper, which is generated from the terminal-printable login URL/content returned by WeChat.
    - Tell the user to scan the QR code printed in the terminal with WeChat, confirm login on the phone, then send any message to the WeChat bot so the helper can capture `WECHAT_CONTEXT_TOKEN`.
    - Wait for the helper to report that WeChat configuration was saved to `codex-notification.env`. Do not ask the user to copy `WECHAT_*` values manually. Complete WeChat credentials enable the provider automatically; `WECHAT_ENABLED` is not required.
+   - Tell the user to restart Codex after setup completes so the updated notification configuration can take effect.
    - If login values already exist but `WECHAT_CONTEXT_TOKEN` is missing, run the installed wrapper with `capture-wechat-context` and ask the user to send any message to the WeChat bot:
      - macOS: `<install-dir>/scripts/run-hook capture-wechat-context`
      - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat-context`
    - Wait for `capture-wechat-context` to report that `WECHAT_CONTEXT_TOKEN` was saved to `codex-notification.env`.
+   - Tell the user to restart Codex after setup completes so the updated notification configuration can take effect.
    - If the QR code expires, rerun `capture-wechat` to print a fresh QR code. Do not reuse old QR output or old login-status keys.
    - If login-status polling or WeChat message-context polling reports a transient timeout, let the helper keep retrying. If an older installed release exits immediately on a timeout, upgrade to the latest release or rerun the helper.
    - If WeChat capture or sending fails on Windows with `TLS handshake timeout` while `curl` or `Invoke-WebRequest` to `https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3` succeeds, set `GODEBUG=netdns=cgo` in `codex-notification.env` and retry. Do not use `netdns=cgo+1` in the saved configuration because it prints diagnostic text.
@@ -93,6 +96,7 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
 13. Verify the binary exists before installing the hook. The wrapper scripts require the release binary and do not run from source:
    - macOS: `bin/codex-notification`
    - Windows: `bin\codex-notification.exe`
-14. Do not send a real QQ, Telegram, or WeChat notification unless the user explicitly asks for a live test.
+14. After hooks and notification configuration are saved, tell the user to restart Codex for the updated hook and notification configuration to take effect.
+15. Do not send a real QQ, Telegram, or WeChat notification unless the user explicitly asks for a live test.
 
 Keep all user-facing conversation in the user's language. Keep any Git or GitHub text in English.

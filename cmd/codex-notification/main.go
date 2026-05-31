@@ -1050,6 +1050,7 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 					return fmt.Errorf("save WeChat configuration: %w", errSave)
 				}
 				_, _ = fmt.Fprintf(stdout, "codex-notification: saved WeChat configuration to %s\n", envPath)
+				printRestartNotice(stdout)
 				return nil
 			case "expired":
 				_, _ = fmt.Fprintln(stdout, "codex-notification: QR expired, requesting a new one")
@@ -1130,6 +1131,7 @@ func captureWeChatContext(stdout io.Writer, stderr io.Writer, getenv func(string
 		return fmt.Errorf("save WeChat context token: %w", errSave)
 	}
 	_, _ = fmt.Fprintf(stdout, "codex-notification: saved WeChat context token to %s\n", envPath)
+	printRestartNotice(stdout)
 	return nil
 }
 
@@ -1275,6 +1277,10 @@ func weChatConfigEnvAssignments(cfg weChatConfig) []envAssignment {
 	}
 	assignments = append(assignments, envAssignment{Name: "WECHAT_API_BASE", Value: strings.TrimRight(strings.TrimSpace(cfg.APIBase), "/")})
 	return assignments
+}
+
+func printRestartNotice(stdout io.Writer) {
+	_, _ = fmt.Fprintln(stdout, "codex-notification: restart Codex for the updated notification configuration to take effect")
 }
 
 func newWeChatBaseInfo() weChatBaseInfo {
@@ -1455,6 +1461,7 @@ func captureOpenID(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 			}
 			_, _ = fmt.Fprintf(stdout, "codex-notification: captured TARGET_OPENID from QQ Bot event %s\n", result.EventType)
 			_, _ = fmt.Fprintf(stdout, "codex-notification: saved QQ Bot TARGET_OPENID to %s\n", envPath)
+			printRestartNotice(stdout)
 			return nil
 		case 11:
 			continue

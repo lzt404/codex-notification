@@ -17,6 +17,8 @@ Install the Codex Notification hook on this machine. Preserve existing hooks and
 
 Codex will detect the current operating system and CPU architecture, download the matching release archive, create or update `~/.codex/codex-notification.env`, and merge the Stop hook into `~/.codex/hooks.json`.
 
+Restart Codex after setup finishes so the updated hook and notification configuration are loaded.
+
 ## License
 
 MIT
