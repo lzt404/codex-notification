@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -156,6 +157,19 @@ type telegramSendMessageResponse struct {
 }
 
 type weChatSendMessageResponse struct{ weChatAPIResponse }
+
+type httpStatusError struct {
+	StatusCode int
+	Body       string
+}
+
+func (err httpStatusError) Error() string {
+	body := strings.TrimSpace(err.Body)
+	if body == "" {
+		return fmt.Sprintf("HTTP %d", err.StatusCode)
+	}
+	return fmt.Sprintf("HTTP %d: %s", err.StatusCode, body)
+}
 
 type weChatUpdatesResponse struct {
 	Messages             []weChatUpdateMessage `json:"msgs"`
@@ -787,6 +801,9 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 	for ctx.Err() == nil {
 		qr, errQR := getWeChatLoginQR(ctx, client, cfg, authBaseURL, stderr)
 		if errQR != nil {
+			if retryWeChatPoll(ctx, stderr, "get WeChat login QR", errQR) {
+				continue
+			}
 			return errQR
 		}
 
@@ -802,6 +819,9 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 		for ctx.Err() == nil {
 			status, errStatus := pollWeChatLoginStatus(ctx, client, cfg, authBaseURL, qrKey, stderr)
 			if errStatus != nil {
+				if retryWeChatPoll(ctx, stderr, "poll WeChat login status", errStatus) {
+					continue
+				}
 				return errStatus
 			}
 
@@ -912,6 +932,9 @@ func waitWeChatContextToken(ctx context.Context, client *http.Client, cfg weChat
 	for ctx.Err() == nil {
 		updates, errUpdates := getWeChatUpdates(ctx, client, cfg, updatesBuf, stderr)
 		if errUpdates != nil {
+			if retryWeChatPoll(ctx, stderr, "get WeChat updates", errUpdates) {
+				continue
+			}
 			return "", errUpdates
 		}
 		if strings.TrimSpace(updates.GetUpdatesBuf) != "" {
@@ -1054,7 +1077,7 @@ func newWeChatBaseInfo() weChatBaseInfo {
 }
 
 func terminalWeChatQRContent(qr weChatQRResponse) string {
-	for _, content := range []string{qr.QRCodeURL, qr.QRCodeContent, qr.QRCode} {
+	for _, content := range []string{qr.QRCodeURL, qr.QRCodeContent} {
 		content = strings.TrimSpace(content)
 		if content == "" {
 			continue
@@ -1064,7 +1087,55 @@ func terminalWeChatQRContent(qr weChatQRResponse) string {
 		}
 		return content
 	}
+	content := strings.TrimSpace(qr.QRCode)
+	if content != "" && !isWeChatQRKey(content) {
+		if _, ok := decodeImageContent(content); !ok {
+			return content
+		}
+	}
 	return ""
+}
+
+func isWeChatQRKey(content string) bool {
+	if len(content) != 32 {
+		return false
+	}
+	for _, char := range content {
+		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func retryWeChatPoll(ctx context.Context, stderr io.Writer, action string, err error) bool {
+	if !isRetryableWeChatRequestError(ctx, err) {
+		return false
+	}
+	_, _ = fmt.Fprintf(stderr, "codex-notification: %s failed, retrying: %v\n", action, err)
+	sleep(ctx, defaultWeChatPoll)
+	return true
+}
+
+func isRetryableWeChatRequestError(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var statusErr httpStatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.StatusCode == http.StatusRequestTimeout ||
+			statusErr.StatusCode == http.StatusTooManyRequests ||
+			statusErr.StatusCode >= http.StatusInternalServerError
+	}
+	return false
 }
 
 func printTerminalQRCode(w io.Writer, content string) {
@@ -1248,7 +1319,7 @@ func getJSONWithHeaders(ctx context.Context, client *http.Client, endpoint strin
 		return nil, fmt.Errorf("read HTTP response: %w", errReadAll)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return nil, httpStatusError{StatusCode: resp.StatusCode, Body: string(responseBody)}
 	}
 
 	return responseBody, nil
@@ -1427,7 +1498,7 @@ func postJSONWithHeaders(ctx context.Context, client *http.Client, endpoint stri
 		return nil, fmt.Errorf("read HTTP response: %w", errReadAll)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		return nil, httpStatusError{StatusCode: resp.StatusCode, Body: string(responseBody)}
 	}
 
 	return responseBody, nil

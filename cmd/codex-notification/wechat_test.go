@@ -116,3 +116,57 @@ func TestWaitWeChatContextToken(t *testing.T) {
 		t.Fatalf("channel version = %q", gotRequest.BaseInfo.ChannelVersion)
 	}
 }
+
+func TestWaitWeChatContextTokenRetriesTransientHTTPError(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, "temporary unavailable", http.StatusBadGateway)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ret":0,"errcode":0,"msgs":[{"from_user_id":"target-user","to_user_id":"account-id","context_token":"captured-context"}]}`)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	token, err := waitWeChatContextToken(ctx, server.Client(), weChatConfig{
+		APIBase:      server.URL,
+		Token:        "token-value",
+		AccountID:    "account-id",
+		TargetUserID: "target-user",
+	}, io.Discard)
+	if err != nil {
+		t.Fatalf("wait context token: %v", err)
+	}
+	if token != "captured-context" {
+		t.Fatalf("token = %q", token)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
+func TestTerminalWeChatQRContentPrefersPrintableLoginURL(t *testing.T) {
+	got := terminalWeChatQRContent(weChatQRResponse{
+		QRCode:        "238499fbd9aab69698e8d44f50e6dd39",
+		QRCodeContent: "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=238499fbd9aab69698e8d44f50e6dd39&bot_type=3",
+	})
+	want := "https://liteapp.weixin.qq.com/q/7GiQu1?qrcode=238499fbd9aab69698e8d44f50e6dd39&bot_type=3"
+	if got != want {
+		t.Fatalf("QR content = %q, want %q", got, want)
+	}
+}
+
+func TestTerminalWeChatQRContentRejectsOpaqueQRKey(t *testing.T) {
+	got := terminalWeChatQRContent(weChatQRResponse{
+		QRCode: "238499fbd9aab69698e8d44f50e6dd39",
+	})
+	if got != "" {
+		t.Fatalf("QR content = %q, want empty", got)
+	}
+}

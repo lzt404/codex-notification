@@ -67,11 +67,16 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
    - If `WECHAT_TOKEN`, `WECHAT_ACCOUNT_ID`, or `WECHAT_TARGET_USER_ID` is missing, run the installed wrapper with `capture-wechat`:
      - macOS: `<install-dir>/scripts/run-hook capture-wechat`
      - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat`
+   - Prefer running `capture-wechat` in a real local terminal window when possible, because QR codes render much faster there than when streamed through the Codex conversation UI.
+   - If you must relay terminal output through the conversation, wait for the QR block to finish, then paste it as one fenced text block.
+   - Do not manually construct a QR code from the raw `qrcode` login-status key. That key may scan as plain text. Use the QR code printed by the helper, which is generated from the terminal-printable login URL/content returned by WeChat.
    - Tell the user to scan the QR code printed in the terminal with WeChat, confirm login on the phone, then send any message to the WeChat bot so the helper can capture `WECHAT_CONTEXT_TOKEN`.
    - Save the printed `WECHAT_TOKEN=...`, `WECHAT_ACCOUNT_ID=...`, `WECHAT_TARGET_USER_ID=...`, `WECHAT_CONTEXT_TOKEN=...`, and `WECHAT_API_BASE=...` lines into `codex-notification.env`. Complete WeChat credentials enable the provider automatically; `WECHAT_ENABLED` is not required.
    - If login values already exist but `WECHAT_CONTEXT_TOKEN` is missing, run the installed wrapper with `capture-wechat-context` and ask the user to send any message to the WeChat bot:
      - macOS: `<install-dir>/scripts/run-hook capture-wechat-context`
      - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat-context`
+   - If the QR code expires, rerun `capture-wechat` to print a fresh QR code. Do not reuse old QR output or old login-status keys.
+   - If login-status polling or WeChat message-context polling reports a transient timeout, let the helper keep retrying. If an older installed release exits immediately on a timeout, upgrade to the latest release or rerun the helper.
    - If WeChat capture or sending fails on Windows with `TLS handshake timeout` while `curl` or `Invoke-WebRequest` to `https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3` succeeds, set `GODEBUG=netdns=cgo` in `codex-notification.env` and retry. Do not use `netdns=cgo+1` in the saved configuration because it prints diagnostic text.
    - Do not save a QR image file or a separate WeChat state JSON file; persist only the printed environment values in `codex-notification.env`.
    - Do not run `capture-wechat` or `capture-wechat-context` from the normal Stop hook; they are only manual setup helpers.
