@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -256,8 +257,10 @@ type transcriptLine struct {
 }
 
 func main() {
+	getenv := getenvWithEnvFile(os.Getenv)
+
 	if len(os.Args) > 1 && (os.Args[1] == "capture-openid" || os.Args[1] == "--capture-openid") {
-		errCapture := captureOpenID(os.Stdout, os.Stderr, os.Getenv)
+		errCapture := captureOpenID(os.Stdout, os.Stderr, getenv)
 		if errCapture != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "codex-notification: %v\n", errCapture)
 			os.Exit(1)
@@ -265,7 +268,7 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "capture-wechat" || os.Args[1] == "--capture-wechat" || os.Args[1] == "wechat-login") {
-		errCapture := captureWeChat(os.Stdout, os.Stderr, os.Getenv)
+		errCapture := captureWeChat(os.Stdout, os.Stderr, getenv)
 		if errCapture != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "codex-notification: %v\n", errCapture)
 			os.Exit(1)
@@ -273,14 +276,14 @@ func main() {
 		return
 	}
 	if len(os.Args) > 1 && (os.Args[1] == "capture-wechat-context" || os.Args[1] == "--capture-wechat-context" || os.Args[1] == "wechat-context") {
-		errCapture := captureWeChatContext(os.Stdout, os.Stderr, os.Getenv)
+		errCapture := captureWeChatContext(os.Stdout, os.Stderr, getenv)
 		if errCapture != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "codex-notification: %v\n", errCapture)
 			os.Exit(1)
 		}
 		return
 	}
-	errRun := run(os.Stdin, os.Stderr, os.Getenv)
+	errRun := run(os.Stdin, os.Stderr, getenv)
 	if errRun == nil {
 		return
 	}
@@ -563,6 +566,203 @@ func envBool(value string) bool {
 	}
 }
 
+type envAssignment struct {
+	Name  string
+	Value string
+}
+
+func getenvWithEnvFile(getenv func(string) string) func(string) string {
+	envPath, errPath := codexNotificationEnvPath(getenv)
+	if errPath != nil {
+		return getenv
+	}
+	values, errValues := readEnvFileValues(envPath)
+	if errValues != nil {
+		return getenv
+	}
+
+	return func(name string) string {
+		if value := getenv(name); value != "" {
+			return value
+		}
+		return values[name]
+	}
+}
+
+func readEnvFileValues(path string) (map[string]string, error) {
+	content, errRead := os.ReadFile(path)
+	if errRead != nil {
+		if errors.Is(errRead, os.ErrNotExist) {
+			return map[string]string{}, nil
+		}
+		return nil, errRead
+	}
+
+	values := make(map[string]string)
+	for _, line := range strings.Split(string(content), "\n") {
+		name, value, ok := parseEnvLine(line)
+		if ok {
+			values[name] = value
+		}
+	}
+	return values, nil
+}
+
+func parseEnvLine(line string) (string, string, bool) {
+	trimmedLine := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	if trimmedLine == "" || strings.HasPrefix(trimmedLine, "#") {
+		return "", "", false
+	}
+	separatorIndex := strings.Index(trimmedLine, "=")
+	if separatorIndex <= 0 {
+		return "", "", false
+	}
+
+	name := strings.TrimSpace(trimmedLine[:separatorIndex])
+	if !isEnvName(name) {
+		return "", "", false
+	}
+	value := convertEnvValue(trimmedLine[separatorIndex+1:])
+	return name, value, true
+}
+
+func convertEnvValue(value string) string {
+	trimmedValue := strings.TrimSpace(value)
+	if len(trimmedValue) >= 2 {
+		firstChar := trimmedValue[:1]
+		lastChar := trimmedValue[len(trimmedValue)-1:]
+		if (firstChar == `"` && lastChar == `"`) || (firstChar == `'` && lastChar == `'`) {
+			return trimmedValue[1 : len(trimmedValue)-1]
+		}
+	}
+	return trimmedValue
+}
+
+func isEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r == '_':
+		case i > 0 && r >= '0' && r <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func codexNotificationEnvPath(getenv func(string) string) (string, error) {
+	if envPath := strings.TrimSpace(getenv("CODEX_NOTIFICATION_ENV")); envPath != "" {
+		return envPath, nil
+	}
+
+	home := strings.TrimSpace(getenv("HOME"))
+	if home == "" {
+		home = strings.TrimSpace(getenv("USERPROFILE"))
+	}
+	if home == "" {
+		var errHome error
+		home, errHome = os.UserHomeDir()
+		if errHome != nil {
+			return "", fmt.Errorf("resolve home directory: %w", errHome)
+		}
+	}
+	if strings.TrimSpace(home) == "" {
+		return "", errors.New("resolve home directory: HOME or USERPROFILE is required")
+	}
+
+	return filepath.Join(home, ".codex", "codex-notification.env"), nil
+}
+
+func saveEnvValues(getenv func(string) string, assignments []envAssignment) (string, error) {
+	envPath, errPath := codexNotificationEnvPath(getenv)
+	if errPath != nil {
+		return "", errPath
+	}
+
+	content, mode, errRead := readEnvFileForUpdate(envPath)
+	if errRead != nil {
+		return "", errRead
+	}
+
+	updatedContent := mergeEnvContent(content, assignments)
+	if errMkdir := os.MkdirAll(filepath.Dir(envPath), 0o700); errMkdir != nil {
+		return "", fmt.Errorf("create env directory: %w", errMkdir)
+	}
+	if errWrite := os.WriteFile(envPath, []byte(updatedContent), mode); errWrite != nil {
+		return "", fmt.Errorf("write env file: %w", errWrite)
+	}
+
+	return envPath, nil
+}
+
+func readEnvFileForUpdate(path string) (string, os.FileMode, error) {
+	info, errStat := os.Stat(path)
+	if errStat != nil {
+		if errors.Is(errStat, os.ErrNotExist) {
+			return "", 0o600, nil
+		}
+		return "", 0, fmt.Errorf("stat env file: %w", errStat)
+	}
+	content, errRead := os.ReadFile(path)
+	if errRead != nil {
+		return "", 0, fmt.Errorf("read env file: %w", errRead)
+	}
+	return string(content), info.Mode().Perm(), nil
+}
+
+func mergeEnvContent(content string, assignments []envAssignment) string {
+	values := make(map[string]string)
+	order := make([]string, 0, len(assignments))
+	for _, assignment := range assignments {
+		name := strings.TrimSpace(assignment.Name)
+		if !isEnvName(name) {
+			continue
+		}
+		if _, ok := values[name]; !ok {
+			order = append(order, name)
+		}
+		values[name] = assignment.Value
+	}
+
+	var lines []string
+	if content != "" {
+		lines = strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+		if len(lines) > 0 && lines[len(lines)-1] == "" {
+			lines = lines[:len(lines)-1]
+		}
+	}
+
+	seen := make(map[string]bool)
+	for index, line := range lines {
+		name, _, ok := parseEnvLine(line)
+		if !ok {
+			continue
+		}
+		value, replace := values[name]
+		if !replace {
+			continue
+		}
+		lines[index] = name + "=" + value
+		seen[name] = true
+	}
+
+	for _, name := range order {
+		if !seen[name] {
+			lines = append(lines, name+"="+values[name])
+		}
+	}
+
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
 func readStopHookInput(stdin io.Reader) (stopHookInput, error) {
 	limitedReader := io.LimitReader(stdin, maxHookInputBytes)
 	data, errReadAll := io.ReadAll(limitedReader)
@@ -799,9 +999,9 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 	authBaseURL := cfg.APIBase
 
 	for ctx.Err() == nil {
-		qr, errQR := getWeChatLoginQR(ctx, client, cfg, authBaseURL, stderr)
+		qr, errQR := getWeChatLoginQR(ctx, client, cfg, authBaseURL, stdout)
 		if errQR != nil {
-			if retryWeChatPoll(ctx, stderr, "get WeChat login QR", errQR) {
+			if retryWeChatPoll(ctx, stdout, "get WeChat login QR", errQR) {
 				continue
 			}
 			return errQR
@@ -813,13 +1013,13 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 			return errors.New("WeChat QR response missing terminal-printable QR content")
 		}
 
-		_, _ = fmt.Fprintln(stderr, "codex-notification: scan this WeChat QR code and confirm login on your phone")
-		printTerminalQRCode(stderr, qrContent)
+		_, _ = fmt.Fprintln(stdout, "codex-notification: scan this WeChat QR code and confirm login on your phone")
+		printTerminalQRCode(stdout, qrContent)
 
 		for ctx.Err() == nil {
-			status, errStatus := pollWeChatLoginStatus(ctx, client, cfg, authBaseURL, qrKey, stderr)
+			status, errStatus := pollWeChatLoginStatus(ctx, client, cfg, authBaseURL, qrKey, stdout)
 			if errStatus != nil {
-				if retryWeChatPoll(ctx, stderr, "poll WeChat login status", errStatus) {
+				if retryWeChatPoll(ctx, stdout, "poll WeChat login status", errStatus) {
 					continue
 				}
 				return errStatus
@@ -827,7 +1027,7 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 
 			switch status.Status {
 			case "scaned":
-				_, _ = fmt.Fprintln(stderr, "codex-notification: QR scanned, waiting for phone confirmation")
+				_, _ = fmt.Fprintln(stdout, "codex-notification: QR scanned, waiting for phone confirmation")
 				sleep(ctx, defaultWeChatPoll)
 			case "scaned_but_redirect":
 				if strings.TrimSpace(status.RedirectHost) != "" {
@@ -840,15 +1040,19 @@ func captureWeChat(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 					return errConfirmed
 				}
 
-				contextToken, errContext := waitWeChatContextToken(ctx, &http.Client{Timeout: defaultWeChatTimeout}, confirmedConfig, stderr)
+				contextToken, errContext := waitWeChatContextToken(ctx, &http.Client{Timeout: defaultWeChatTimeout}, confirmedConfig, stdout)
 				if errContext != nil {
 					return fmt.Errorf("capture WeChat context token: %w", errContext)
 				}
 				confirmedConfig.ContextToken = contextToken
-				printWeChatConfigEnv(stdout, confirmedConfig)
+				envPath, errSave := saveEnvValues(getenv, weChatConfigEnvAssignments(confirmedConfig))
+				if errSave != nil {
+					return fmt.Errorf("save WeChat configuration: %w", errSave)
+				}
+				_, _ = fmt.Fprintf(stdout, "codex-notification: saved WeChat configuration to %s\n", envPath)
 				return nil
 			case "expired":
-				_, _ = fmt.Fprintln(stderr, "codex-notification: QR expired, requesting a new one")
+				_, _ = fmt.Fprintln(stdout, "codex-notification: QR expired, requesting a new one")
 				goto nextQR
 			default:
 				sleep(ctx, defaultWeChatPoll)
@@ -917,11 +1121,15 @@ func captureWeChatContext(stdout io.Writer, stderr io.Writer, getenv func(string
 	defer cancel()
 
 	client := &http.Client{Timeout: defaultWeChatTimeout}
-	contextToken, errToken := waitWeChatContextToken(ctx, client, cfg, stderr)
+	contextToken, errToken := waitWeChatContextToken(ctx, client, cfg, stdout)
 	if errToken != nil {
 		return errToken
 	}
-	printWeChatContextEnv(stdout, contextToken)
+	envPath, errSave := saveEnvValues(getenv, []envAssignment{{Name: "WECHAT_CONTEXT_TOKEN", Value: strings.TrimSpace(contextToken)}})
+	if errSave != nil {
+		return fmt.Errorf("save WeChat context token: %w", errSave)
+	}
+	_, _ = fmt.Fprintf(stdout, "codex-notification: saved WeChat context token to %s\n", envPath)
 	return nil
 }
 
@@ -1056,18 +1264,17 @@ func validateWeChatAPIResponse(apiName string, response weChatAPIResponse) error
 	return nil
 }
 
-func printWeChatConfigEnv(stdout io.Writer, cfg weChatConfig) {
-	_, _ = fmt.Fprintf(stdout, "WECHAT_TOKEN=%s\n", strings.TrimSpace(cfg.Token))
-	_, _ = fmt.Fprintf(stdout, "WECHAT_ACCOUNT_ID=%s\n", strings.TrimSpace(cfg.AccountID))
-	_, _ = fmt.Fprintf(stdout, "WECHAT_TARGET_USER_ID=%s\n", strings.TrimSpace(cfg.TargetUserID))
-	if strings.TrimSpace(cfg.ContextToken) != "" {
-		printWeChatContextEnv(stdout, cfg.ContextToken)
+func weChatConfigEnvAssignments(cfg weChatConfig) []envAssignment {
+	assignments := []envAssignment{
+		{Name: "WECHAT_TOKEN", Value: strings.TrimSpace(cfg.Token)},
+		{Name: "WECHAT_ACCOUNT_ID", Value: strings.TrimSpace(cfg.AccountID)},
+		{Name: "WECHAT_TARGET_USER_ID", Value: strings.TrimSpace(cfg.TargetUserID)},
 	}
-	_, _ = fmt.Fprintf(stdout, "WECHAT_API_BASE=%s\n", strings.TrimRight(strings.TrimSpace(cfg.APIBase), "/"))
-}
-
-func printWeChatContextEnv(stdout io.Writer, contextToken string) {
-	_, _ = fmt.Fprintf(stdout, "WECHAT_CONTEXT_TOKEN=%s\n", strings.TrimSpace(contextToken))
+	if strings.TrimSpace(cfg.ContextToken) != "" {
+		assignments = append(assignments, envAssignment{Name: "WECHAT_CONTEXT_TOKEN", Value: strings.TrimSpace(cfg.ContextToken)})
+	}
+	assignments = append(assignments, envAssignment{Name: "WECHAT_API_BASE", Value: strings.TrimRight(strings.TrimSpace(cfg.APIBase), "/")})
+	return assignments
 }
 
 func newWeChatBaseInfo() weChatBaseInfo {
@@ -1183,8 +1390,8 @@ func captureOpenID(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 		return errGateway
 	}
 
-	_, _ = fmt.Fprintf(stderr, "codex-notification: waiting for QQ message command %q for up to %s\n", defaultCaptureCmd, defaultCaptureWait)
-	_, _ = fmt.Fprintln(stderr, "codex-notification: send this command to the bot from the QQ account you want to notify")
+	_, _ = fmt.Fprintf(stdout, "codex-notification: waiting for QQ message command %q for up to %s\n", defaultCaptureCmd, defaultCaptureWait)
+	_, _ = fmt.Fprintln(stdout, "codex-notification: send this command to the bot from the QQ account you want to notify")
 
 	conn, _, errDial := websocket.Dial(ctx, gatewayURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{
@@ -1234,7 +1441,7 @@ func captureOpenID(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 			}
 		case 0:
 			if payload.T == "READY" {
-				_, _ = fmt.Fprintln(stderr, "codex-notification: QQ Bot gateway ready")
+				_, _ = fmt.Fprintln(stdout, "codex-notification: QQ Bot gateway ready")
 				continue
 			}
 
@@ -1242,7 +1449,12 @@ func captureOpenID(stdout io.Writer, stderr io.Writer, getenv func(string) strin
 			if !ok {
 				continue
 			}
-			printCaptureResult(stdout, result)
+			envPath, errSave := saveEnvValues(getenv, []envAssignment{{Name: "TARGET_OPENID", Value: result.TargetOpenID}})
+			if errSave != nil {
+				return fmt.Errorf("save QQ Bot TARGET_OPENID: %w", errSave)
+			}
+			_, _ = fmt.Fprintf(stdout, "codex-notification: captured TARGET_OPENID from QQ Bot event %s\n", result.EventType)
+			_, _ = fmt.Fprintf(stdout, "codex-notification: saved QQ Bot TARGET_OPENID to %s\n", envPath)
 			return nil
 		case 11:
 			continue
@@ -1410,11 +1622,6 @@ func captureOpenIDFromPayload(payload gatewayPayload) (captureResult, bool) {
 
 func captureCommandMatches(content string) bool {
 	return content == defaultCaptureCmd || strings.Contains(content, defaultCaptureCmd)
-}
-
-func printCaptureResult(stdout io.Writer, result captureResult) {
-	_, _ = fmt.Fprintf(stdout, "# Captured from QQ Bot event: %s\n", result.EventType)
-	_, _ = fmt.Fprintf(stdout, "TARGET_OPENID=%s\n", result.TargetOpenID)
 }
 
 func stringFromMap(values map[string]any, key string) string {

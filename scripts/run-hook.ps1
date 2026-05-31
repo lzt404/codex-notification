@@ -61,6 +61,8 @@ if (Test-Path -LiteralPath $EnvFile) {
     }
 }
 
+[Environment]::SetEnvironmentVariable("CODEX_NOTIFICATION_ENV", $EnvFile, "Process")
+
 if (Test-Path -LiteralPath $Bin) {
     & $Bin @args
     exit $LASTEXITCODE

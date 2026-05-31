@@ -46,6 +46,8 @@ if [ -f "${ENV_FILE}" ]; then
     done < "${ENV_FILE}"
 fi
 
+export CODEX_NOTIFICATION_ENV="${ENV_FILE}"
+
 if [ -x "${BIN}" ]; then
     exec "${BIN}" "$@"
 fi

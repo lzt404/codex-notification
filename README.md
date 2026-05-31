@@ -2,7 +2,7 @@
 
 Codex Notification is a Codex `Stop` hook that sends a plain-text QQ Bot, Telegram Bot, or WeChat message when a Codex turn finishes.
 
-WeChat scan binding is available as a manual setup helper. It also captures the WeChat conversation context token needed for delivery. The normal `Stop` hook path only sends the completion text notification.
+WeChat scan binding is available as a manual setup helper. It captures the WeChat conversation context token needed for delivery and saves the captured values into `~/.codex/codex-notification.env`. The normal `Stop` hook path only sends the completion text notification.
 
 ## Install With Codex
 
