@@ -1,19 +1,54 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH= cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${CODEX_NOTIFICATION_ENV:-${HOME}/.codex/codex-notification.env}"
 BIN="${CODEX_NOTIFICATION_BIN:-${PROJECT_ROOT}/bin/codex-notification}"
 
-if [[ -f "${ENV_FILE}" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "${ENV_FILE}"
-    set +a
+trim_env_string() {
+    printf '%s' "$1" | sed 's/\r$//; s/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+convert_env_value() {
+    value=
+    value="$(trim_env_string "$1")"
+
+    first_char="$(printf '%s' "${value}" | cut -c 1)"
+    last_char="$(printf '%s' "${value}" | sed 's/.*\(.\)$/\1/')"
+    if [ "${first_char}" = '"' ] && [ "${last_char}" = '"' ]; then
+        value="$(printf '%s' "${value}" | sed 's/^"//; s/"$//')"
+    elif [ "${first_char}" = "'" ] && [ "${last_char}" = "'" ]; then
+        value="$(printf '%s' "${value}" | sed "s/^'//; s/'$//")"
+    fi
+
+    printf '%s' "${value}"
+}
+
+if [ -f "${ENV_FILE}" ]; then
+    while IFS= read -r line || [ -n "${line}" ]; do
+        trimmed_line="$(trim_env_string "${line}")"
+        case "${trimmed_line}" in
+            ""|\#*) continue ;;
+        esac
+        case "${trimmed_line}" in
+            *=*) ;;
+            *) continue ;;
+        esac
+
+        name="$(trim_env_string "${trimmed_line%%=*}")"
+        if ! printf '%s\n' "${name}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
+            continue
+        fi
+
+        value="$(convert_env_value "${trimmed_line#*=}")"
+        export "${name}=${value}"
+    done < "${ENV_FILE}"
 fi
 
-if [[ -x "${BIN}" ]]; then
+export CODEX_NOTIFICATION_ENV="${ENV_FILE}"
+
+if [ -x "${BIN}" ]; then
     exec "${BIN}" "$@"
 fi
 

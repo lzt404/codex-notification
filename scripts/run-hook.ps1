@@ -1,5 +1,13 @@
 $ErrorActionPreference = "Stop"
 
+try {
+    $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+    [Console]::InputEncoding = $Utf8NoBom
+    [Console]::OutputEncoding = $Utf8NoBom
+    $OutputEncoding = $Utf8NoBom
+} catch {
+}
+
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent $ScriptDir
 
@@ -52,6 +60,8 @@ if (Test-Path -LiteralPath $EnvFile) {
         [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
     }
 }
+
+[Environment]::SetEnvironmentVariable("CODEX_NOTIFICATION_ENV", $EnvFile, "Process")
 
 if (Test-Path -LiteralPath $Bin) {
     & $Bin @args
