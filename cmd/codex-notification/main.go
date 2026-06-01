@@ -317,19 +317,19 @@ func run(stdin io.Reader, stderr io.Writer, getenv func(string) string) error {
 
 	client := &http.Client{Timeout: defaultTimeout}
 
+	var sendErrors []error
 	if cfg.QQ != nil {
 		token, errToken := fetchAccessToken(ctx, client, *cfg.QQ, stderr)
 		if errToken != nil {
-			return errToken
-		}
-
-		errSend := sendQQTextMessage(ctx, client, *cfg.QQ, token, message, stderr)
-		if errSend != nil {
-			return errSend
+			sendErrors = append(sendErrors, errToken)
+		} else {
+			errSend := sendQQTextMessage(ctx, client, *cfg.QQ, token, message, stderr)
+			if errSend != nil {
+				sendErrors = append(sendErrors, errSend)
+			}
 		}
 	}
 
-	var sendErrors []error
 	if cfg.Telegram != nil {
 		errSend := sendTelegramTextMessage(ctx, client, *cfg.Telegram, message, stderr)
 		if errSend != nil {
@@ -1742,11 +1742,10 @@ func randomWeChatUIN() string {
 	_, errRead := cryptorand.Read(randomBytes[:])
 	if errRead != nil {
 		value := uint32(time.Now().UnixNano())
-		return base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(uint64(value), 10)))
+		binary.BigEndian.PutUint32(randomBytes[:], value)
 	}
 
-	value := binary.BigEndian.Uint32(randomBytes[:])
-	return base64.StdEncoding.EncodeToString([]byte(strconv.FormatUint(uint64(value), 10)))
+	return base64.StdEncoding.EncodeToString(randomBytes[:])
 }
 
 func truncateRunes(value string, limit int) string {
