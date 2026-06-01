@@ -3,15 +3,32 @@ name: Release
 on:
     push:
         tags:
-            - "*"
+            - "v*"
 
 permissions:
     contents: write
 
 jobs:
+    test:
+        name: Test
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Go
+              uses: actions/setup-go@v5
+              with:
+                  go-version-file: go.mod
+                  cache: true
+
+            - name: Run tests
+              run: go test ./...
+
     build:
         name: Build ${{ matrix.asset_os }} ${{ matrix.goarch }}
         runs-on: ubuntu-latest
+        needs: test
         strategy:
             fail-fast: false
             matrix:
