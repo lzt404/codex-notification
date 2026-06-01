@@ -14,13 +14,16 @@ convert_env_value() {
     value=
     value="$(trim_env_string "$1")"
 
-    first_char="$(printf '%s' "${value}" | cut -c 1)"
-    last_char="$(printf '%s' "${value}" | sed 's/.*\(.\)$/\1/')"
-    if [ "${first_char}" = '"' ] && [ "${last_char}" = '"' ]; then
-        value="$(printf '%s' "${value}" | sed 's/^"//; s/"$//')"
-    elif [ "${first_char}" = "'" ] && [ "${last_char}" = "'" ]; then
-        value="$(printf '%s' "${value}" | sed "s/^'//; s/'$//")"
-    fi
+    case "${value}" in
+        \"*\")
+            value=${value#\"}
+            value=${value%\"}
+            ;;
+        \'*\')
+            value=${value#\'}
+            value=${value%\'}
+            ;;
+    esac
 
     printf '%s' "${value}"
 }
@@ -37,9 +40,11 @@ if [ -f "${ENV_FILE}" ]; then
         esac
 
         name="$(trim_env_string "${trimmed_line%%=*}")"
-        if ! printf '%s\n' "${name}" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$'; then
-            continue
-        fi
+        case "${name}" in
+            ""|[0-9]*|*[!A-Za-z0-9_]*)
+                continue
+                ;;
+        esac
 
         value="$(convert_env_value "${trimmed_line#*=}")"
         export "${name}=${value}"

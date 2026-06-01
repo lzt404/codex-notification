@@ -4,19 +4,53 @@ You are installing the Codex Notification Stop hook on this machine.
 
 Repository: `lzt404/codex-notification`
 Latest release page: `https://github.com/lzt404/codex-notification/releases/latest`
+Releases list page: `https://github.com/lzt404/codex-notification/releases`
+Expanded assets page: `https://github.com/lzt404/codex-notification/releases/expanded_assets/<tag>`
 Configuration file: `~/.codex/codex-notification.env`
 
 Follow these steps in order. Guide the user one step at a time. Do not ask for all credentials at once.
 
+Safety rules:
+
+- Preserve existing hooks and existing notification configuration.
+- When editing `~/.codex/hooks.json`, always write valid UTF-8 JSON without a byte order mark (BOM). Codex hook parsing can fail at line 1 column 1 when the file starts with `EF BB BF`.
+- On Windows PowerShell 5, do not write `hooks.json` with `Set-Content -Encoding UTF8`, because that writes a UTF-8 BOM. Use .NET UTF-8 without BOM instead:
+  ```powershell
+  $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($HooksPath, $Json + [Environment]::NewLine, $Utf8NoBom)
+  ```
+- For interactive capture helpers that print a QR code or wait for user messages, open a visible local terminal window by default. Do not hide the terminal, redirect the QR output to a file, or stream the QR through the Codex conversation unless opening a local terminal is impossible.
+
 1. Detect the current operating system and CPU architecture.
-2. Download the latest release archive that matches the current platform:
+2. Resolve the release tag, then download the release archive that matches the current platform:
    - macOS Intel: `codex-notification_<tag>_macos_amd64.tar.gz`
    - macOS Apple Silicon: `codex-notification_<tag>_macos_arm64.tar.gz`
    - Windows Intel/AMD 64-bit: `codex-notification_<tag>_windows_amd64.zip`
    - Windows ARM64: `codex-notification_<tag>_windows_arm64.zip`
+   - If the user explicitly provides a release tag or version, use that version. Normalize plain versions such as `1.1.4` to `v1.1.4`; keep values that already start with `v`.
+   - If the user did not provide a version, resolve the latest tag using stable non-API pages first, then verify it before downloading:
+     1. Fetch `https://github.com/lzt404/codex-notification/releases` and use the newest release entry marked `Latest`; if the `Latest` marker is not easy to parse, use the first release tag shown on that releases list.
+     2. Optionally cross-check `https://api.github.com/repos/lzt404/codex-notification/releases/latest` when it is available. Use `tag_name`, but do not stop if the unauthenticated API is rate limited.
+     3. You may also fetch `https://github.com/lzt404/codex-notification/releases/latest`, but use only the redirect `Location` header or final URL to determine the tag. Do not trust the page title or body text from `/releases/latest`, because cached or tool-rendered HTML can lag behind the releases list.
+        - On Windows PowerShell 5, avoid `Invoke-WebRequest -MaximumRedirection 0` for this check because it can throw instead of returning a clean response. Use:
+          ```powershell
+          $Request = [System.Net.HttpWebRequest]::Create('https://github.com/lzt404/codex-notification/releases/latest')
+          $Request.AllowAutoRedirect = $false
+          $Request.UserAgent = 'codex-install-hook'
+          $Response = $Request.GetResponse()
+          try { $Response.Headers['Location'] } finally { $Response.Close() }
+          ```
+        - With `curl`, use the effective final URL:
+          ```sh
+          curl -I -L -s -o /dev/null -w '%{url_effective}' https://github.com/lzt404/codex-notification/releases/latest
+          ```
+   - Always verify the resolved tag by opening `https://github.com/lzt404/codex-notification/releases/expanded_assets/<tag>` and finding the exact platform asset link before constructing the download URL.
+   - If release sources disagree, prefer an explicit user-provided version first, then the release list entry marked `Latest`, then the highest semver tag whose expanded-assets page contains the required platform asset. State the concrete tag chosen before downloading.
+   - Do not guess an asset URL until the matching asset name has been confirmed from `expanded_assets/<tag>`.
 3. Extract the archive into a stable local install directory:
    - macOS: `~/.codex/codex-notification`
    - Windows: `%USERPROFILE%\.codex\codex-notification`
+   - After extraction, normalize the layout so the install directory directly contains `bin`, `scripts`, and `codex-notification.env.example`. If the archive extracts into a single top-level directory, move that directory's contents up one level.
 4. Create `~/.codex/codex-notification.env` if it does not exist. Use `codex-notification.env.example` as the template.
 5. Preserve any existing values in `codex-notification.env`.
 6. Configure notification providers interactively:
@@ -35,6 +69,7 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
         - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-openid`
      3. Tell the user to send `/openid` as a private message to the QQ Bot from the QQ account that should receive notifications.
      4. Wait for the helper to report that `TARGET_OPENID` was saved to `codex-notification.env`.
+     5. Tell the user to restart Codex after setup completes so the updated notification configuration can take effect.
    - If capture times out, ask the user to run capture again and send `/openid` again. Also ask them to confirm that the message was sent to the bot application that owns the configured `APP_ID`.
 8. Configure Telegram Bot if the user enables it:
    - Ask the user to open Telegram and start a chat with `@BotFather`.
@@ -63,18 +98,60 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
      3. Ask the user to send another new message and run `getUpdates` again.
 9. Configure WeChat if the user enables it:
    - Explain that WeChat notifications use the Weixin HTTP JSON API channel and send plain text only.
-   - If `WECHAT_TOKEN`, `WECHAT_ACCOUNT_ID`, or `WECHAT_TARGET_USER_ID` is missing, run the installed wrapper with `capture-wechat`:
+   - If `WECHAT_TOKEN`, `WECHAT_ACCOUNT_ID`, or `WECHAT_TARGET_USER_ID` is missing, run the installed wrapper with `capture-wechat`.
+   - Open `capture-wechat` in a new visible local terminal window by default, because QR codes render and scan much faster there than when streamed through the Codex conversation UI.
+   - On macOS, open Terminal with `osascript` and pass the wrapper path as an argument so paths with spaces are quoted correctly:
+     ```sh
+     RUN_HOOK="<install-dir>/scripts/run-hook"
+     /usr/bin/osascript - "$RUN_HOOK" <<'OSA'
+     on run argv
+       set runHook to item 1 of argv
+       tell application "Terminal"
+         activate
+         do script quoted form of runHook & " capture-wechat"
+       end tell
+     end run
+     OSA
+     ```
+   - On Windows, open a visible PowerShell window. Use `-NoExit` so success or error output remains visible, and quote the script path inside the argument string:
+     ```powershell
+     $RunHook = Join-Path $InstallDir 'scripts\run-hook.ps1'
+     $ArgumentList = '-NoExit -NoProfile -ExecutionPolicy Bypass -File "' + $RunHook + '" capture-wechat'
+     Start-Process -FilePath 'powershell.exe' -ArgumentList $ArgumentList
+     ```
+   - If a visible terminal cannot be opened, run the wrapper in the current terminal:
      - macOS: `<install-dir>/scripts/run-hook capture-wechat`
      - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat`
-   - Prefer running `capture-wechat` in a real local terminal window when possible, because QR codes render much faster there than when streamed through the Codex conversation UI.
    - If you must relay terminal output through the conversation, wait for the QR block to finish, then paste it as one fenced text block.
    - Do not manually construct a QR code from the raw `qrcode` login-status key. That key may scan as plain text. Use the QR code printed by the helper, which is generated from the terminal-printable login URL/content returned by WeChat.
    - Tell the user to scan the QR code printed in the terminal with WeChat, confirm login on the phone, then send any message to the WeChat bot so the helper can capture `WECHAT_CONTEXT_TOKEN`.
    - Wait for the helper to report that WeChat configuration was saved to `codex-notification.env`. Do not ask the user to copy `WECHAT_*` values manually. Complete WeChat credentials enable the provider automatically; `WECHAT_ENABLED` is not required.
-   - If login values already exist but `WECHAT_CONTEXT_TOKEN` is missing, run the installed wrapper with `capture-wechat-context` and ask the user to send any message to the WeChat bot:
+   - Tell the user to restart Codex after setup completes so the updated notification configuration can take effect.
+   - If login values already exist but `WECHAT_CONTEXT_TOKEN` is missing, run the installed wrapper with `capture-wechat-context` in a new visible local terminal window and ask the user to send any message to the WeChat bot.
+   - On macOS:
+     ```sh
+     RUN_HOOK="<install-dir>/scripts/run-hook"
+     /usr/bin/osascript - "$RUN_HOOK" <<'OSA'
+     on run argv
+       set runHook to item 1 of argv
+       tell application "Terminal"
+         activate
+         do script quoted form of runHook & " capture-wechat-context"
+       end tell
+     end run
+     OSA
+     ```
+   - On Windows:
+     ```powershell
+     $RunHook = Join-Path $InstallDir 'scripts\run-hook.ps1'
+     $ArgumentList = '-NoExit -NoProfile -ExecutionPolicy Bypass -File "' + $RunHook + '" capture-wechat-context'
+     Start-Process -FilePath 'powershell.exe' -ArgumentList $ArgumentList
+     ```
+   - If a visible terminal cannot be opened, run the wrapper in the current terminal:
      - macOS: `<install-dir>/scripts/run-hook capture-wechat-context`
      - Windows: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1" capture-wechat-context`
    - Wait for `capture-wechat-context` to report that `WECHAT_CONTEXT_TOKEN` was saved to `codex-notification.env`.
+   - Tell the user to restart Codex after setup completes so the updated notification configuration can take effect.
    - If the QR code expires, rerun `capture-wechat` to print a fresh QR code. Do not reuse old QR output or old login-status keys.
    - If login-status polling or WeChat message-context polling reports a transient timeout, let the helper keep retrying. If an older installed release exits immediately on a timeout, upgrade to the latest release or rerun the helper.
    - If WeChat capture or sending fails on Windows with `TLS handshake timeout` while `curl` or `Invoke-WebRequest` to `https://ilinkai.weixin.qq.com/ilink/bot/get_bot_qrcode?bot_type=3` succeeds, set `GODEBUG=netdns=cgo` in `codex-notification.env` and retry. Do not use `netdns=cgo+1` in the saved configuration because it prints diagnostic text.
@@ -89,10 +166,18 @@ Follow these steps in order. Guide the user one step at a time. Do not ask for a
    - Add a `Stop` command hook that points to `scripts/run-hook` on macOS.
    - Add a `Stop` command hook that runs `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<install-dir>\scripts\run-hook.ps1"` on Windows.
    - Do not duplicate the hook if an equivalent Codex Notification hook already exists.
+   - Preserve unrelated hook events and unrelated `Stop` hook entries.
+   - After serializing the merged JSON, write `hooks.json` as UTF-8 without BOM. On Windows PowerShell 5, use:
+     ```powershell
+     $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+     [System.IO.File]::WriteAllText($HooksPath, $Json + [Environment]::NewLine, $Utf8NoBom)
+     ```
+   - Verify the file starts with `{`, not the UTF-8 BOM byte sequence `EF BB BF`, before telling the user to restart Codex.
 12. On macOS, make sure `scripts/run-hook` is executable.
 13. Verify the binary exists before installing the hook. The wrapper scripts require the release binary and do not run from source:
    - macOS: `bin/codex-notification`
    - Windows: `bin\codex-notification.exe`
-14. Do not send a real QQ, Telegram, or WeChat notification unless the user explicitly asks for a live test.
+14. After hooks and notification configuration are saved, tell the user to restart Codex for the updated hook and notification configuration to take effect.
+15. Do not send a real QQ, Telegram, or WeChat notification unless the user explicitly asks for a live test.
 
 Keep all user-facing conversation in the user's language. Keep any Git or GitHub text in English.
